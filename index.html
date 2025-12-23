@@ -1,0 +1,217 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>椭球面圆截面动态演示 - 南京师范大学 陈慧斌副教授</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <!-- React & Three.js dependencies via ESM -->
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "three": "https://esm.sh/three@0.160.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.11",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@9.88.16",
+    "lucide-react": "https://esm.sh/lucide-react@0.294.0",
+    "@google/genai": "https://esm.sh/@google/genai@1.34.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "katex/": "https://esm.sh/katex@^0.16.27/"
+  }
+}
+</script>
+    <script src="https://esm.sh/@babel/standalone@7.23.5"></script>
+    <style>
+        body, html, #root { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #0f172a; }
+        .katex { font-size: 1.1em; }
+    </style>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useMemo, useEffect, useRef } from 'react';
+        import ReactDOM from 'react-dom';
+        import * as THREE from 'three';
+        import { Canvas } from '@react-three/fiber';
+        import { OrbitControls, Grid, PerspectiveCamera, Text, Line } from '@react-three/drei';
+        import { Calculator, RotateCcw, Target, Info, HelpCircle, BookOpen, Sliders } from 'lucide-react';
+
+        // --- 1. 3D 场景组件 ---
+        const EllipsoidScene = ({ params }) => {
+            const { a, b, c, theta } = params;
+            const thetaRad = (theta * Math.PI) / 180;
+
+            const ellipsoidMesh = useMemo(() => {
+                const geometry = new THREE.SphereGeometry(1, 64, 64);
+                geometry.scale(a, b, c);
+                return geometry;
+            }, [a, b, c]);
+
+            const intersectionPoints = useMemo(() => {
+                const points = [];
+                const inv_b_int_sq = (Math.cos(thetaRad) ** 2) / (b * b) + (Math.sin(thetaRad) ** 2) / (c * c);
+                const b_int = Math.sqrt(1 / inv_b_int_sq);
+                const segments = 128;
+                for (let i = 0; i <= segments; i++) {
+                    const phi = (i / segments) * Math.PI * 2;
+                    const u = a * Math.cos(phi);
+                    const v = b_int * Math.sin(phi);
+                    points.push([u, v * Math.cos(thetaRad), v * Math.sin(thetaRad)]);
+                }
+                return points;
+            }, [a, b, c, thetaRad]);
+
+            const isCircular = Math.abs(a - Math.sqrt(1 / ((Math.cos(thetaRad)**2)/(b*b) + (Math.sin(thetaRad)**2)/(c*c)))) < 0.05;
+
+            return (
+                <group>
+                    <mesh geometry={ellipsoidMesh}>
+                        <meshStandardMaterial color="#818cf8" transparent opacity={0.25} side={THREE.DoubleSide} />
+                    </mesh>
+                    <mesh geometry={ellipsoidMesh}>
+                        <meshBasicMaterial color="#4f46e5" wireframe transparent opacity={0.1} />
+                    </mesh>
+                    <group rotation={[thetaRad, 0, 0]}>
+                        <mesh>
+                            <planeGeometry args={[Math.max(a,b,c)*2.5, Math.max(a,b,c)*2.5]} />
+                            <meshStandardMaterial color="#ec4899" transparent opacity={0.1} side={THREE.DoubleSide} />
+                        </mesh>
+                    </group>
+                    <Line points={intersectionPoints} color={isCircular ? "#10b981" : "#f43f5e"} lineWidth={isCircular ? 5 : 2} />
+                    <primitive object={new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 8, 0xef4444)} />
+                    <primitive object={new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 8, 0x22c55e)} />
+                    <primitive object={new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), 8, 0x3b82f6)} />
+                </group>
+            );
+        };
+
+        // --- 2. 控制面板与数学推导组件 ---
+        const MathContent = ({ params, targetTheta }) => {
+            const containerRef = useRef();
+            useEffect(() => {
+                if (window.renderMathInElement && containerRef.current) {
+                    window.renderMathInElement(containerRef.current, {
+                        delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }]
+                    });
+                }
+            }, [params, targetTheta]);
+
+            return (
+                <div ref={containerRef} className="space-y-4 text-slate-300 text-sm p-4 bg-slate-900/50 rounded-xl border border-slate-700">
+                    <p>标准椭球面方程：$$\frac{x^2}{a^2} + \frac{y^2}{b^2} + \frac{z^2}{c^2} = 1$$</p>
+                    <p>平面：$y \sin \theta - z \cos \theta = 0$</p>
+                    <p>圆截面条件：$$\frac{1}{a^2} = \frac{\cos^2 \theta}{b^2} + \frac{\sin^2 \theta}{c^2}$$</p>
+                    {targetTheta !== null && (
+                        <p className="text-emerald-400 font-bold italic">当前解：$\theta \approx \pm {targetTheta.toFixed(2)}^\circ$</p>
+                    )}
+                </div>
+            );
+        };
+
+        // --- 3. 主程序 App ---
+        const App = () => {
+            const [params, setParams] = useState({ a: 4, b: 6, c: 3, theta: 0 });
+            const [showMath, setShowMath] = useState(true);
+
+            const canBeCircular = (params.a >= params.b && params.a <= params.c) || (params.a <= params.b && params.a >= params.c);
+            
+            const targetTheta = useMemo(() => {
+                if (!canBeCircular || params.b === params.c) return null;
+                const sinSq = (1/(params.a**2) - 1/(params.b**2)) / (1/(params.c**2) - 1/(params.b**2));
+                if (sinSq < 0 || sinSq > 1) return null;
+                return (Math.asin(Math.sqrt(sinSq)) * 180) / Math.PI;
+            }, [params]);
+
+            return (
+                <div className="flex flex-col md:flex-row h-full">
+                    <div className="flex-grow relative bg-slate-900">
+                        <header className="absolute top-4 left-4 z-10 p-4 bg-slate-900/60 backdrop-blur-md rounded-2xl border border-slate-700">
+                            <h1 className="text-white font-bold text-lg flex items-center gap-2">
+                                <Calculator size={20} className="text-indigo-400" />
+                                椭球面圆截面动态演示
+                            </h1>
+                            <p className="text-slate-400 text-xs">南京师范大学 · 陈慧斌副教授</p>
+                        </header>
+
+                        <Canvas shadows>
+                            <PerspectiveCamera makeDefault position={[12, 8, 12]} fov={45} />
+                            <OrbitControls />
+                            <ambientLight intensity={0.6} />
+                            <pointLight position={[10, 10, 10]} intensity={1} />
+                            <EllipsoidScene params={params} />
+                            <Grid infiniteGrid fadeDistance={40} sectionColor="#334155" cellColor="#1e293b" />
+                        </Canvas>
+
+                        <div className="absolute bottom-6 left-6 z-10">
+                           <div className={`px-4 py-2 rounded-full text-xs font-bold text-white shadow-lg ${canBeCircular ? 'bg-emerald-600 animate-pulse' : 'bg-amber-600'}`}>
+                               {canBeCircular ? '● 存在圆截面解' : '○ 当前比例无圆截面'}
+                           </div>
+                        </div>
+                    </div>
+
+                    <div className="w-full md:w-96 bg-slate-800 border-l border-slate-700 p-6 overflow-y-auto flex flex-col gap-6">
+                        <section>
+                            <h2 className="text-slate-200 font-bold mb-4 flex items-center gap-2"><Sliders size={18}/> 参数控制</h2>
+                            <div className="space-y-4">
+                                {['a', 'b', 'c'].map(k => (
+                                    <div key={k} className="space-y-1">
+                                        <div className="flex justify-between text-xs text-slate-400">
+                                            <span>轴长 {k}</span>
+                                            <span className="text-white font-mono">{params[k]}</span>
+                                        </div>
+                                        <input type="range" min="1" max="10" step="0.1" value={params[k]} 
+                                            onChange={e => setParams({...params, [k]: parseFloat(e.target.value)})}
+                                            className="w-full accent-indigo-500" />
+                                    </div>
+                                ))}
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-slate-400">
+                                        <span>平面角度 θ</span>
+                                        <span className="text-pink-400 font-mono">{params.theta.toFixed(1)}°</span>
+                                    </div>
+                                    <input type="range" min="0" max="90" step="0.5" value={params.theta} 
+                                        onChange={e => setParams({...params, theta: parseFloat(e.target.value)})}
+                                        className="w-full accent-pink-500" />
+                                </div>
+                            </div>
+                        </section>
+
+                        <button onClick={() => targetTheta !== null && setParams({...params, theta: targetTheta})}
+                            disabled={!canBeCircular}
+                            className={`w-full py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 ${canBeCircular ? 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}>
+                            <Target size={18}/> 自动定位圆截面
+                        </button>
+
+                        <section className="flex-grow">
+                             <div className="flex items-center justify-between mb-2">
+                                <h2 className="text-slate-200 font-bold flex items-center gap-2"><BookOpen size={18}/> 数学原理</h2>
+                                <button onClick={() => setShowMath(!showMath)} className="text-xs text-indigo-400 hover:underline">
+                                    {showMath ? '隐藏' : '展开'}
+                                </button>
+                             </div>
+                             {showMath && <MathContent params={params} targetTheta={targetTheta} />}
+                        </section>
+                        
+                        <footer className="pt-4 border-t border-slate-700 text-[10px] text-slate-500 text-center">
+                            © 南京师范大学数学科学学院 - 教学辅助工具
+                        </footer>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
